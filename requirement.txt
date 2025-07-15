@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+alembic
+asyncpg
+sqlalchemy
+dotenv
+sqlalchemy[asyncio]
