@@ -49,5 +49,12 @@ class SendRequest(BaseModel):
 
 
 
+class GetTheUser(BaseModel):
+    name:str
+    email:EmailStr
+    hashed_password:str
+    description:Optional[str]
 
+    class Config:
+        orm_mode = True
 
