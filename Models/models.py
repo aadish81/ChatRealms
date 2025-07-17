@@ -27,8 +27,21 @@ class User(BaseModel):
     #Relationships with group   
     groups = relationship('Group',secondary="group_and_user_association",back_populates='users')
     #Relationship with request table
-    Request_sent = relationship("User",secondary="join_requests",primaryjoin="JoinRequest.from_id == User.id",secondaryjoin="JoinRequest.to_id == User.id",cascade="all,delete-orphan",single_parent=True)
-    Request_received = relationship("User",secondary="join_requests",primaryjoin="JoinRequest.to_id == User.id",secondaryjoin="JoinRequest.from_id == User.id")
+    request_sent = relationship("User",
+                                secondary="join_requests",
+                                primaryjoin="JoinRequest.from_id == User.id",
+                                secondaryjoin="JoinRequest.to_id == User.id",
+                                cascade="all,delete-orphan",
+                                single_parent=True,
+                                back_populates="request_received"
+                                )
+
+    request_received = relationship("User",
+                                    secondary="join_requests",
+                                    primaryjoin="JoinRequest.to_id == User.id",
+                                    secondaryjoin="JoinRequest.from_id == User.id",
+                                    back_populates="request_sent"
+                                    )
 
 
 class AiAgents(BaseModel):
