@@ -6,7 +6,7 @@ from fastapi import Depends,HTTPException,status
 from dotenv import load_dotenv
 from Database.database import db_session
 from sqlalchemy import select
-from Models.models import User
+from Models.models import User,Group
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional , List
@@ -35,7 +35,7 @@ def get_password_hash(password:str):
 
 
 def verify_password(plain_password:str,hashed_password:str):
-    pwd_context.verify(plain_password,hashed_password)
+    return pwd_context.verify(plain_password,hashed_password)
 
 
 
@@ -52,10 +52,21 @@ async def get_user(db:AsyncSession,username:str):
         return False  
 
 
+async def get_group(db:AsyncSession,groupname):
+    try:
+        query = select(Group).where(Group.name == groupname)
+        result = await db.execute(query)
+        group = result.scalars().first()
+        if not group:
+            return False
+        return group
+    except SQLAlchemyError as e:
+        return False
+
 
 async def authenticate_user(username:str,password:str,db:AsyncSession):
     user = await get_user(db=db,username=username)
-    if not user or  verify_password(password,user.hashed_password):
+    if not user or not verify_password(password,user.hashed_password):
         return False
     return user
 
@@ -79,10 +90,10 @@ async def get_current_user(db:db_session,token:str = Depends(oauth2_scheme)):
             raise credentials_exception
         token_data = TokenData(username=username)
     except JWTError as e:
-        raise credentials_exception
+        raise HTTPException(status_code=404,detail="Couldn't authenticate user vai Token.")
     user = await get_user(db=db,username=token_data.username)
     if not user:
-        raise credentials_exception
+        raise HTTPException(status_code=404,detail=f"No user found.")
     return user
 
         

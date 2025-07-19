@@ -15,6 +15,14 @@ class BaseModel(Base):
 
     id = Column(UUID(as_uuid=True),primary_key=True,default=uuid.uuid4,index=True)
 
+#Table for revoked Tokens
+revoke_token = Table(
+    "revoked_tokens",
+    Base.metadata,
+    Column('token', String, primary_key=True),
+    Column('expires_at',DateTime,nullable=False)
+)
+
 
 class User(BaseModel):
     __tablename__ = "users"
@@ -24,13 +32,15 @@ class User(BaseModel):
     email = Column(Text,unique=True,nullable=False,index=True)
     profile_picture = Column(String,nullable=True)
     description = Column(Text,nullable=True)
+    token_version = Column(Integer,default=0,nullable=False)
+    
     #Relationships with group   
     groups = relationship('Group',secondary="group_and_user_association",back_populates='users')
     #Relationship with request table
     request_sent = relationship("User",
                                 secondary="join_requests",
-                                primaryjoin="JoinRequest.from_id == User.id",
-                                secondaryjoin="JoinRequest.to_id == User.id",
+                                primaryjoin="User.name == JoinRequest.from_name ",
+                                secondaryjoin="User.name==JoinRequest.to_name ",
                                 cascade="all,delete-orphan",
                                 single_parent=True,
                                 back_populates="request_received"
@@ -38,8 +48,8 @@ class User(BaseModel):
 
     request_received = relationship("User",
                                     secondary="join_requests",
-                                    primaryjoin="JoinRequest.to_id == User.id",
-                                    secondaryjoin="JoinRequest.from_id == User.id",
+                                    primaryjoin="User.name == JoinRequest.to_name",
+                                    secondaryjoin="User.name == JoinRequest.from_name",
                                     back_populates="request_sent"
                                     )
 
@@ -106,18 +116,15 @@ class AgentMessage(BaseModel):
     specific_agent_msg_in_group = relationship("GroupAndAgent",back_populates="specific_agent_msgs_in_group")
 
 
-# class Conversation(BaseModel):
-#     __tablename__ = "conversations"
-
     
 
 class JoinRequest(BaseModel):
     __tablename__ = "join_requests"
 
-    from_id = Column(UUID(as_uuid=True),ForeignKey("users.id",ondelete="CASCADE"))
-    to_id = Column(UUID(as_uuid=True),ForeignKey("users.id",ondelete="CASCADE"))
-    group_id = Column(UUID(as_uuid=True),ForeignKey("groups.id",ondelete="CASCADE"))
+    from_name = Column(String,ForeignKey("users.name",ondelete="CASCADE"))
+    to_name = Column(String,ForeignKey("users.name",ondelete="CASCADE"))
+    group_name = Column(String,ForeignKey("groups.name",ondelete="CASCADE"))
     accepted = Column(Boolean,default=False)#this line needs migration 
 
-    __table_args__ = (UniqueConstraint("to_id","from_id"),)
+    __table_args__ = (UniqueConstraint("to_name","group_name"),)
 

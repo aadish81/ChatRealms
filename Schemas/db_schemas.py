@@ -2,6 +2,7 @@ from pydantic import BaseModel,EmailStr
 from sqlalchemy import UUID
 from typing import Optional
 from uuid import UUID
+from typing import List
 
 
 class RegisterUser(BaseModel):
@@ -23,29 +24,19 @@ class GetUsers(BaseModel):
 
 class RegisterGroup(BaseModel):
     name:str
-    admin_user:str
     description:Optional[str]
 
     class Config:
         orm_mode = True
 
-# class HumanMessage(BaseModel):
-#     message:str
-
-# class AgentMessage(BaseModel):
-#     message:str
-
-# class SendRequest(BaseModel):
-#     to_user:UUID
-
 
 class SendRequest(BaseModel):
-    from_id:UUID
     to_name:str
-    group_id:UUID
+    group_name:str
 
     class Config:
         orm_mode = True
+
 
 
 
@@ -55,6 +46,23 @@ class GetTheUser(BaseModel):
     hashed_password:str
     description:Optional[str]
 
+
     class Config:
         orm_mode = True
 
+
+class OutRequest(BaseModel):
+    from_name:str
+    to_name:str
+    group_name:str
+
+    class Config:
+        orm_mode = True
+
+class AddToHumanGroup(BaseModel):
+    group_name:str
+    response:bool
+
+class ChangePassword(BaseModel):
+    current_password:str
+    new_password:str
