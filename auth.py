@@ -2,16 +2,18 @@ from passlib.context import CryptContext
 from datetime import datetime,timedelta
 from jose import JWTError,jwt
 from fastapi.security import OAuth2PasswordBearer     
-from fastapi import Depends,HTTPException,status
+from fastapi import Depends,HTTPException,status,WebSocket,WebSocketException
 from dotenv import load_dotenv
-from Database.database import db_session
+from Database.database import db_session ,get_db
 from sqlalchemy import select
-from Models.models import User,Group
+from Models.models import User,Group,revoked_tokens
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional , List
 import os
 from pydantic import BaseModel
+
+
 
 
 
@@ -25,7 +27,7 @@ class TokenData(BaseModel):
 
     
 pwd_context = CryptContext(schemes=["bcrypt"],deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")  
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")  
 
 
 
@@ -81,20 +83,72 @@ def create_access_token(data:dict, expires_delta:timedelta ):
 
 
 
+
 async def get_current_user(db:db_session,token:str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Could not validate credentials.",headers={"WWW-Authenticate":"Bearer"},)
     try:
-        payload = jwt.decode(token,os.getenv('SECRET_KEY'),algorithms=os.getenv('ALGORITHM'))
+        #Check if token is revoked
+        revoke_query = select(revoked_tokens).where(revoked_tokens.c.token == token)
+        revoke_result = await db.execute(revoke_query)
+        result =  revoke_result.fetchone() 
+        if result:
+            raise credentials_exception
+
+        #Decode JWT
+        payload = jwt.decode(token , os.getenv('SECRET_KEY')  , algorithms=os.getenv('ALGORITHM'))
         username:str = payload.get('username')
-        if username is None: 
+        token_version:int = payload.get('token_version')
+
+        #Check if JWT is valid
+        if username is None or token_version is None: 
             raise credentials_exception
         token_data = TokenData(username=username)
+
+
     except JWTError as e:
-        raise HTTPException(status_code=404,detail="Couldn't authenticate user vai Token.")
+        raise credentials_exception
+
+    #Fetch  and return the current user if all the above code ran successfully.
     user = await get_user(db=db,username=token_data.username)
-    if not user:
-        raise HTTPException(status_code=404,detail=f"No user found.")
+    if user is None or user.token_version != token_version:
+        raise credentials_exception
     return user
 
         
 
+async def get_current_user_ws(websocket:WebSocket,db:AsyncSession = Depends(get_db)):
+
+    # credential_exception = WebSocketException(code=status.WS_1008_POLICY_VIOLATION,reason="Could not validate token.")
+
+    #Extract jwt token form url
+    token = websocket.query_params.get('token')
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="Missing token")
+        raise WebSocketException(code=1008, reason="Missing token")
+        
+
+    #Decode jwt token  
+    try:
+        payload = jwt.decode(token,os.getenv('SECRET_KEY'),algorithms=os.getenv('ALGORITHM'))
+        username:str = payload.get('username')
+        token_version:int = int(payload.get('token_version'))
+        if  username is None or token_version is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="Could not validate token.")
+            raise WebSocketException(code=1008, reason="Invalid token")
+
+        #Check if content of jwt are valid  and return user if valid
+        token_data = TokenData(username = username)
+        user = await get_user(username=token_data.username,db=db)
+        if user is None or user.token_version != token_version:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="Invalid token or version.")
+            raise WebSocketException(code=1008, reason="Invalid token or version.")
+       
+        return user
+
+    except JWTError as e:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="Invalid JWT")
+        raise WebSocketException(code=1008, reason="Invalid token")
+
+        
+
+    
