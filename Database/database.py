@@ -16,11 +16,15 @@ AsyncSessionLocal = sessionmaker(engine,class_=AsyncSession,autoflush=False,expi
 
 Base = declarative_base()
 
-async def get_db():
-    db = AsyncSessionLocal()
-    try:
-        yield db
-    finally:
-        await db.close() 
+# async def get_db():
+#     db = AsyncSessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         await db.close() 
 
+async def get_db():
+    async with AsyncSessionLocal() as db:
+        yield db
+        
 db_session = Annotated[AsyncSession,Depends(get_db)]
