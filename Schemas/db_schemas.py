@@ -66,3 +66,18 @@ class AddToHumanGroup(BaseModel):
 class ChangePassword(BaseModel):
     current_password:str
     new_password:str
+
+
+
+
+
+class SendMessage(BaseModel):
+    message:str
+    sender:str
+
+    class Config:
+        orm_mode = True
+
+class GetGroup(BaseModel):
+    name:str
+    description:Optional[str]
