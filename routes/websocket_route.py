@@ -1,18 +1,25 @@
 from routes.protected_routes import protected_router
-from fastapi import WebSocket,Depends,status , HTTPException,WebSocketException
+from routes.public_routes import public_router
+from fastapi import WebSocket,Depends,status , HTTPException,WebSocketDisconnect,APIRouter
 from auth import get_current_user_ws
 from pydantic import BaseModel
 from typing import Dict , Set
-from Database.database import db_session
+from Database.database import db_session,AsyncSessionLocal,get_db
 from auth import get_group,get_current_user
-from Models.models import GroupAndUser,User,HumanMessage
+from Models.models import GroupAndUser,User,HumanMessage,Group
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from Schemas.db_schemas import SendMessage,GetUsers
+import json
+
+
+ws_router = APIRouter(dependencies=[Depends(get_current_user_ws)])
 
 
 
-async def ConnectionManager():
+class ConnectionManager():
     def __init__(self):
         self.group_connections: Dict[str,Set[WebSocket]]  = {}
         self.user_groups : Dict[str,Set[str]] = {}
@@ -30,11 +37,11 @@ async def ConnectionManager():
 
     async def disconnect(self,group_name:str,user:str,websocket:WebSocket):
         if group_name in self.group_connections:
-            self.group_connections[group_name].discard(wbesocket)#remove the websocket passed as argument
+            self.group_connections[group_name].remove(websocket)#remove the websocket passed as argument
             if not self.group_connections[group_name]:#if self.group_connections is empty i.e. None
                 del self.group_connections[group_name]#deletes the "group_name":() as no sockets are present in "group_name"
         if user in self.user_groups and group_name in self.user_groups[user]:
-            self.user_groups[user].discard(group_name)
+            self.user_groups[user].remove(group_name)
             if not self.user_groups[user]:
                 del self.user_groups[user]
 
@@ -46,7 +53,7 @@ async def ConnectionManager():
                     if group in self.group_connections: # if selected group is in self.group_connection 
                         if websocket in self.group_connections[group]:
                             await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="Session Invalidated.")
-                            self.group_connections[group].discard(websocket)
+                            self.group_connections[group].remove(websocket)
                             if not self.group_connections[group]:
                                 del self.group_connections[group]
             del self.user_groups[user]
@@ -54,56 +61,70 @@ async def ConnectionManager():
     async def broadcast(self,sender:str,message:str,group_name:str):
         if group_name in self.group_connections:
             for websockets in self.group_connections[group_name]:
-                await websockets.send_text({'sender':sender,'message':message})
+                await websockets.send_text(f"{sender}:{message}")
 
 
-manager = await ConnectionManager()
+manager = ConnectionManager()
 
 
-@protected_router.websocket("/ws/chat/group/{group_name}")
-async def websocket_group(group_name:str,websocket:WebSocket,db:db_session,current_user:User = Depends(get_current_user_ws)):
+@ws_router.websocket("/chat/group/{group_name}")
+async def websocket_group(group_name:str,websocket:WebSocket,current_user:User = Depends(get_current_user_ws),db:AsyncSession = Depends(get_db)):
     try:
-        group = get_group(db,group_name)
-        
+        # Check if the group exists
+        group = await get_group(db,group_name)
         if not group:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="No such group.")
-        
-        query = select(GroupAndUser).where(GroupAndUser.group_id == group.id, GroupAndUser.user_id == current_user.id )
-        result = await query.execute(query)
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="No such group.")
+            return
+        # Check if the user is a member of the group
+        query = select(GroupAndUser).where(GroupAndUser.group_id == group.id, GroupAndUser.user_id == current_user.id)
+        result = await db.execute(query)
         record = result.scalars().first()
         if not record:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="You are not a member of this group yet.")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="You are not a member of this group yet.")
+            return
+
     except SQLAlchemyError as e:
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,detail="Databse error.")
-    
-    
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="Database error...")
+        return   
+
+
+    await manager.connect(websocket,group.name,current_user.name)
 
     try:
-        await manager.connect(websocket,group.name,current_user.name)
-        query = select(Group).options(selectionload(Group.humans_messages),selectionload(Group.agents_messages)).where(Group.id ==group.id)
+        # Send existing messages to the user
+        # Fetch all messages in the group
+        # Using selectinload to eagerly load related messages and their senders
+        # This will load all human messages and their senders in one query
+        # and all agent messages in another query
+
+        query = select(Group).options(selectinload(Group.humans_messages).selectinload(HumanMessage.sender),selectinload(Group.agents_messages)).where(Group.id == group.id)
         result  = await db.execute(query)
-        all_messages = result.scalars().all()
-        for msg in all_messages:
+        current_group = result.scalars().first()
+        if not current_group:
+            await manager.disconnect(group.name,current_user.name,websocket)
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION,reason="No such group found.")
+            return
+        # Send existing human messages
+        for msg in current_group.humans_messages:
             await websocket.send_text(f"{msg.sender}:{msg.message}")
+
+
         while True:
-            message = await websocket.receive_text()
+            message:str = await websocket.receive_text()
+
             new_message = HumanMessage(message = message,user_id = current_user.id,group_id=group.id)
             db.add(new_message)
-            await ab.commit()
+            await db.commit()
+
             await manager.broadcast(current_user.name,message,group.name)
-    except WebSocketException as e:
+
+    except WebSocketDisconnect as e:
         await manager.disconnect(group.name,current_user.name,websocket)
 
+        
 
 
-@protected_router.get("/namaskar",response_model=GetUsers)
-async def say_Namaskar(db:db_session,user:User = Depends(get_current_user)):
-    query = select(USer).where(User.id == user.id)
-    result = await execute(query)
-    user_exit = result.scalars().first()
-    if not user_exit:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="user not found....")
-    return user_exit
+
 
 
 
