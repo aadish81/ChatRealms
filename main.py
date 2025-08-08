@@ -8,6 +8,8 @@ from routes.protected_routes import protected_router
 from routes.public_routes import public_router
 from Schemas.db_schemas import RegisterUser,RegisterGroup,GetUsers,SendRequest
 from Models.models import User,Group,JoinRequest
+from routes.websocket_route import ws_router
+
 
 
    
@@ -16,8 +18,9 @@ from Models.models import User,Group,JoinRequest
 
 app = FastAPI()
 
-app.include_router(public_router, prefix="/auth")
+app.include_router(public_router, prefix="")
 app.include_router(protected_router, prefix="/api")
+app.include_router(ws_router,prefix="/ws")
 
 
 
