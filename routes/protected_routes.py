@@ -112,7 +112,7 @@ async def get_all_requests(db:db_session,current_user:User = Depends(get_current
 
 
 
-@protected_router.post("/respond_to_request",response_model=Response)
+@protected_router.post("/respond_to_request")
 async def respond_to_request(decision:AddToHumanGroup,db:db_session,current_user:User=Depends(get_current_user)):
     if decision.response:
         try:
